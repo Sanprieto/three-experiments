@@ -6,7 +6,7 @@ import cubeHelper from './cubeHelper'
 import createGrids from './createGrids'
 import CallbackMixer from './CallbackMixer'
 import bufferGeometryMerger from './bufferGeometryMerger'
-import {debounce, random, times} from 'lodash'
+import {debounce, throttle, random, times, remove} from 'lodash'
 
 window.THREE = THREE
 window.gui = new dat.GUI({closeOnTop: true, hideable: false, width: 350})
@@ -18,8 +18,10 @@ window.scene = new THREE.Scene()
 scene.background = new THREE.Color( 0x000000);
 let mixers = []
 
-window.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100000)
-camera.position.set(1000, 1000, 1000)
+
+window.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100000)
+camera.position.set(-2000, 2100, 0)
+
 
 window.renderer = new THREE.WebGLRenderer({antialias: true})
 renderer.setSize(window.innerWidth, window.innerHeight)
@@ -27,7 +29,7 @@ renderer.shadowMap.enabled = true
 document.body.appendChild(renderer.domElement)
 document.body.style.margin = 0
 
-let gridsPosition = new THREE.Vector3(0, -100, 0)
+let gridsPosition = new THREE.Vector3(0, -25, 0)
 let grids = createGrids(2000, 20, gridsPosition)
 scene.add(grids)
 
@@ -60,9 +62,10 @@ scene.add( light );
 
 
 window.controls = new OrbitControls(camera, renderer.domElement)
-controls.target.set(-200, 0, -200)
+controls.target.set(200, 0, 0)
 controls.enableKeys = false
 controls.autoUpdate = false
+controls.update()
 
 //let light = new THREE.HemisphereLight('white', 'black', 2)
 //scene.add(light)
@@ -158,20 +161,20 @@ function geometries () {
 
     parent.add(mergedMesh)
   }
-
-  function clearChildren (group) {
-    group.children.forEach(child => {
-      if (child.geometry)
-        child.geometry.dispose()
-
-      child.parent = null
-    })
-
-    group.children.length = 0
-  }
 }
 
 gui.add({geometries}, 'geometries').onChange(function(){this.remove()})
+
+function clearChildren (group) {
+  group.children.forEach(child => {
+    if (child.geometry)
+      child.geometry.dispose()
+
+    child.parent = null
+  })
+
+  group.children.length = 0
+}
 
 function randUint24 () {
   return Math.floor(0xffffff * Math.random())
@@ -343,6 +346,386 @@ gui.add({rollerCoaster}, 'rollerCoaster').onChange(function(){this.remove()})
 // }
 
 // gui.add({experiments}, 'experiments')
+
+let LinearAccelerationMixer = function(object, acceleration) {
+  return {
+    update (delta) {
+      let speedDelta = acceleration.clone().multiplyScalar(delta)
+      object.userData.speed.add(speedDelta)
+    }
+  }
+}
+
+let SpeedMixer = function(object, speed) {
+  return {
+    update (delta) {
+      let positionDelta = speed.clone().multiplyScalar(delta)
+
+      if (object.userData.rotation)
+        positionDelta.applyAxisAngle({x:0, y:1, z:0}, object.userData.rotation)
+
+      object.position.add(positionDelta)
+    }
+  }
+}
+
+function kinematics () {
+
+  function generateCube(tracked) {
+    let cube = cubeHelper({x:0, y:0, z:0})
+    scene.add(cube)
+
+    cube.userData.speed = new THREE.Vector3(
+      random(-10, 10),
+      random(0, 10),
+      random(-10, 10)
+    )
+
+    cube.userData.acceleration = new THREE.Vector3(
+      random(-100, 100),
+      random(0, 100),
+      random(-100, 100)
+    )
+
+    cube.userData.speedMixer = new SpeedMixer(cube, cube.userData.speed)
+    cube.userData.accelerationMixer = new LinearAccelerationMixer(cube, cube.userData.acceleration)
+
+    mixers.push(cube.userData.accelerationMixer)
+    mixers.push(cube.userData.speedMixer)
+
+    if (tracked) {
+      let cubeFolder = cubesFolder.addFolder(`cube ${cube.id}`)
+
+      let cubePositionFolder = cubeFolder.addFolder('position')
+      cubePositionFolder.add(cube.position, 'x').listen()
+      cubePositionFolder.add(cube.position, 'y').listen()
+      cubePositionFolder.add(cube.position, 'z').listen()
+
+      let cubeSpeedFolder = cubeFolder.addFolder('speed')
+      cubeSpeedFolder.add(cube.userData.speed, 'x').listen()
+      cubeSpeedFolder.add(cube.userData.speed, 'y').listen()
+      cubeSpeedFolder.add(cube.userData.speed, 'z').listen()
+      cubeSpeedFolder.add({reflect(){
+        cube.userData.speed.reflect(cube.position.clone().normalize())
+      }}, 'reflect')
+
+      let cubeAccelerationFolder = cubeFolder.addFolder('acceleration')
+      cubeAccelerationFolder.add(cube.userData.acceleration, 'x').listen()
+      cubeAccelerationFolder.add(cube.userData.acceleration, 'y').listen()
+      cubeAccelerationFolder.add(cube.userData.acceleration, 'z').listen()
+      cubeAccelerationFolder.add({reflect(){
+        cube.userData.acceleration.reflect(cube.position.clone().normalize())
+      }}, 'reflect')
+
+      cube.userData.guiFolder = cubeFolder
+    }
+
+    return cube
+  }
+
+  let cubes = new THREE.Group()
+  scene.add(cubes)
+
+  let kinematicsFolder = gui.addFolder('kinematics')
+
+  let kinematicsSettings = {
+    amount: 50,
+    tracked: false,
+    addCube(){
+      cubes.add(generateCube(this.tracked))
+    },
+    addCubes() {
+      times(this.amount, () => {
+        cubes.add(generateCube(this.tracked))
+      })
+    },
+    clearCubes() {
+      cubes.children.forEach(cube => {
+        if (cube.userData.guiFolder)
+          cubesFolder.removeFolder(cube.userData.guiFolder)
+
+        remove(mixers, cube.userData.speedMixer)
+        remove(mixers, cube.userData.accelerationMixer)
+      })
+      clearChildren(cubes)
+    }
+  }
+  kinematicsFolder.add(kinematicsSettings, 'addCube')
+  kinematicsFolder.add(kinematicsSettings, 'amount', 5, 200, 5)
+  kinematicsFolder.add(kinematicsSettings, 'addCubes')
+  kinematicsFolder.add(kinematicsSettings, 'clearCubes')
+  kinematicsFolder.add(kinematicsSettings, 'tracked')
+
+  kinematicsFolder.add({reflect(){
+    cubes.children.forEach(cube => {
+      cube.userData.speed.reflect(cube.position.clone().normalize())
+      cube.userData.acceleration.reflect(cube.position.clone().normalize())
+    })
+  }}, 'reflect')
+
+  let cubesFolder = kinematicsFolder.addFolder('cubes')
+}
+
+gui.add({kinematics}, 'kinematics').onChange(function(){this.remove()})
+
+function wasd () {
+  let cube = cubeHelper({x: 0, y:0, z:0}, 50)
+
+  cube.userData.speed = new THREE.Vector3(0, 0, 0)
+  cube.userData.acceleration = new THREE.Vector3(0, 0, 0)
+
+  cube.userData.speedMixer = new SpeedMixer(cube, cube.userData.speed)
+  cube.userData.accelerationMixer = new LinearAccelerationMixer(cube, cube.userData.acceleration)
+
+  mixers.push(cube.userData.accelerationMixer)
+  mixers.push(cube.userData.speedMixer)
+
+  scene.add(cube)
+  let speed = 300
+  let rotationDelta = 0.05
+  let parameter = 'speed'
+
+  const recognizedKeys = {
+    w: {
+      axis: 'x',
+      direction: 1,
+      opposite: 's',
+      movement: true
+    },
+    s: {
+      axis: 'x',
+      direction: -1,
+      opposite: 'w',
+      movement: true
+    },
+    a: {
+      axis: 'z',
+      direction: -1,
+      opposite: 'd',
+      movement: true
+    },
+    d: {
+      axis: 'z',
+      direction: 1,
+      opposite: 'a',
+      movement: true
+    },
+    e: {
+      axis: 'y',
+      direction: -1,
+      opposite: 'q',
+      rotation: true
+    },
+    q: {
+      axis: 'y',
+      direction: 1,
+      opposite: 'e',
+      rotation: true
+    }
+  }
+
+  let pressedKeys = {}
+
+  function applyRotation (){
+    Object.keys(pressedKeys).forEach(keyName => {
+      let key = recognizedKeys[keyName]
+      if (!key.rotation)
+        return
+
+      let twoInSameAxis = pressedKeys[keyName] && pressedKeys[key.opposite]
+      let noneInAxis = !(pressedKeys[keyName] || pressedKeys[key.opposite])
+
+      if (twoInSameAxis || noneInAxis) {
+        return
+      }
+
+      if (pressedKeys[keyName]){
+        cube.rotation[key.axis] += rotationDelta * key.direction
+        cube.userData.rotation = cube.rotation[key.axis]
+      }
+    })
+  }
+
+  function applySpeeds (){
+    let movingAxis = Object.keys(pressedKeys).filter(keyName => {
+      return recognizedKeys[keyName].movement && pressedKeys[keyName] === true
+    }).length
+
+    Object.keys(pressedKeys).forEach(keyName => {
+      let key = recognizedKeys[keyName]
+      if (!key.movement)
+        return
+
+      let twoInSameAxis = pressedKeys[keyName] && pressedKeys[key.opposite]
+      let noneInAxis = !(pressedKeys[keyName] || pressedKeys[key.opposite])
+
+      if (twoInSameAxis || noneInAxis) {
+        cube.userData[parameter][key.axis] = 0
+        return
+      }
+
+      if (pressedKeys[keyName]){
+        cube.userData[parameter][key.axis] = (speed/movingAxis) * key.direction
+      }
+    })
+  }
+
+  let floorTiles = {}
+  const probes = new THREE.Group()
+  scene.add(probes)
+  const tiles = new THREE.Group()
+  scene.add(tiles)
+
+  let floorSettings = {
+    drawProbes: true,
+    tileSize: 500
+  }
+
+  gui.add(floorSettings, 'drawProbes').onChange(() => {clearChildren(probes)})
+  gui.add(floorSettings, 'tileSize', 100, 2000, 10).onChange(() => {
+    clearChildren(tiles)
+    floorTiles = {}
+  })
+
+  function discretizePosition ({x, z}) {
+    return {
+      x: Math.floor(x / floorSettings.tileSize),
+      z: Math.floor(z / floorSettings.tileSize),
+      y: 0
+    }
+  }
+
+  function tilePosition ({x, z}) {
+    const offset = new THREE.Vector3(floorSettings.tileSize/2, 0, floorSettings.tileSize/2)
+
+    return offset.add({
+      x: x * floorSettings.tileSize,
+      z: z * floorSettings.tileSize,
+      y: -25
+    })
+  }
+
+  function tileId (coords) {
+    let {x, z} = discretizePosition(coords)
+
+    return `${x}-${z}`
+  }
+
+  function generateTile (coords) {
+    let tileGeometry = new THREE.PlaneBufferGeometry(floorSettings.tileSize, floorSettings.tileSize)
+    let tile = new THREE.Mesh(tileGeometry, new THREE.MeshStandardMaterial({
+      color: randUint24(),
+      side: THREE.DoubleSide
+    }))
+
+    tile.rotation.x = Math.PI/2
+
+    tile.position.copy(tilePosition(discretizePosition(coords)))
+
+    return tile
+  }
+
+  function checkFloor (coords) {
+    return floorTiles[tileId(coords)]
+  }
+
+  function addTile (coords) {
+    let tile = generateTile(coords)
+
+    floorTiles[tileId(coords)] = true
+    tiles.add(tile)
+  }
+
+  function ensureFloorAhead (distance) {
+    let aheadPosition = new THREE.Vector3(1, 0, 0).multiplyScalar(distance)
+
+    let slices = 16
+    times(slices, (i) => {
+      let thisAngle = (Math.PI * 2) / slices * i
+
+      let thisAngleAheadPosition = aheadPosition.clone()
+      thisAngleAheadPosition.applyAxisAngle({x:0, y:1, z:0}, thisAngle)
+
+      let probePosition = thisAngleAheadPosition.add(cube.position)
+
+      if (!checkFloor(probePosition)){
+        addTile(probePosition)
+      }
+
+      if (floorSettings.drawProbes) {
+        let probe = cubeHelper(probePosition, 5)
+        probes.add(probe)
+      }
+    })
+  }
+
+  let ensureFloorMixer = new CallbackMixer(throttle((ratio) => {
+    if (floorSettings.drawProbes) {
+      clearChildren(probes)
+    }
+    times(2, (i) => ensureFloorAhead(floorSettings.tileSize * (i + 2) * 0.6) )
+  }, 200), 1, Infinity)
+  mixers.push(ensureFloorMixer)
+
+  function keydown(event){
+    if (event.target.nodeName !== 'BODY')
+      return
+
+    let key = event.key.toLowerCase()
+    if (recognizedKeys[key]) {
+      pressedKeys[key] = true
+      applySpeeds()
+      applyRotation()
+    }
+  }
+
+  function keyup(event){
+    let key = event.key.toLowerCase()
+    if (recognizedKeys[key]){
+      pressedKeys[key] = false
+      applySpeeds()
+      applyRotation()
+    }
+  }
+
+  document.addEventListener('keydown', keydown)
+  document.addEventListener('keyup', keyup)
+  document.body.focus()
+
+  gui.add({wasd(){
+    document.body.focus()
+  }}, 'wasd').name('recover focus')
+
+  let cameraSettings = {
+    firstPerson: false,
+    originalCameraPosition: {},
+    originalCameraRotation: {}
+  }
+
+  gui.add(cameraSettings, 'firstPerson').onChange(active => {
+    if (active) {
+      cameraSettings.originalCameraPosition = camera.position.clone()
+      cameraSettings.originalCameraRotation = camera.rotation.clone()
+      controls.reset()
+      controls.enabled = false
+
+      cube.add(camera)
+      camera.position.set(0, 0, 0)
+      camera.rotation.y = -Math.PI/2
+    }
+    else {
+      cube.remove(camera)
+      controls.enabled = true
+
+      camera.position.copy(cameraSettings.originalCameraPosition)
+      camera.rotation.copy(cameraSettings.originalCameraRotation)
+    }
+  })
+
+}
+
+gui.add({wasd}, 'wasd').onChange(function(){this.remove()})
+setTimeout(wasd, 100)
 
 function texts(){
   let textArea = document.createElement('textarea')
