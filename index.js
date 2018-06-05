@@ -7,6 +7,7 @@ import createGrids from './createGrids'
 import CallbackMixer from './CallbackMixer'
 import bufferGeometryMerger from './bufferGeometryMerger'
 import {debounce, throttle, random, times, remove} from 'lodash'
+import SimplexNoise from 'simplex-noise'
 
 window.THREE = THREE
 window.gui = new dat.GUI({closeOnTop: true, hideable: false, width: 350})
@@ -15,8 +16,8 @@ document.body.appendChild(stats.dom)
 let clock = new THREE.Clock()
 
 window.scene = new THREE.Scene()
-//scene.background = new THREE.Color( 0x000000);
-scene.background = new THREE.Color( 0xffffff);
+scene.background = new THREE.Color( 0x000000);
+//scene.background = new THREE.Color( 0xffffff);
 let mixers = []
 
 window.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100000)
@@ -35,10 +36,10 @@ scene.add(grids)
 
 
 var spriteMap = new THREE.TextureLoader().load( "assets/img/treeOne.png" );
-var spriteMaterial = new THREE.SpriteMaterial( { map: spriteMap, transparent: false} );
+var spriteMaterial = new THREE.SpriteMaterial( { map: spriteMap, light: true, transparent: true} );
 var sprite = new THREE.Sprite( spriteMaterial );
 scene.add( sprite );
-sprite.position.set(0,250,0)
+sprite.position.set(800,290,0)
 sprite.scale.set(700,700,700)
 
 var geometry = new THREE.BoxGeometry( 600, 600, 600 );
@@ -47,7 +48,7 @@ var cube = new THREE.Mesh( geometry, material );
 //scene.add( cube );
 
 var light = new THREE.AmbientLight( 0x404040, 0.4); // soft white light
-scene.add( light );
+//scene.add( light );
 
 let spotLight = new THREE.SpotLight( 0xffffff );
 spotLight.position.set( 100, 1500, 100 );
@@ -61,7 +62,7 @@ spotLight.shadow.camera.near = 500;
 spotLight.shadow.camera.far = 4000;
 spotLight.shadow.camera.fov = 30;
 
-scene.add( spotLight );
+//scene.add( spotLight );
 
 
 window.controls = new OrbitControls(camera, renderer.domElement)
@@ -79,6 +80,26 @@ pointLight.castShadow = true
 
 // let lightHelper = new THREE.PointLightHelper(pointLight)
 // scene.add(lightHelper)
+
+var lighter = new THREE.PointLight( 0xffffff, 3, 700 );
+
+window.sceneSettings = {
+  Intensity: 3,
+  Decay: 0.5,
+  //lightMain: false,
+}
+
+let sceneFolder = gui.addFolder('scene')
+  sceneFolder.add(sceneSettings, 'Intensity',  0.1, 100).step( 0.1 ).name('Intensity Light').onChange( function() { 
+  lighter.intensity = sceneSettings.Intensity
+
+  })
+  sceneFolder.add(sceneSettings, 'Decay',  0, 3).onChange( function() { 
+    console.log(sceneSettings.Decay)
+    lighter.decay = sceneSettings.Decay
+ 
+  })
+
 
 let gridsFolder = gui.addFolder('grids')
 gridsFolder.add(grids, 'visible')
@@ -620,12 +641,17 @@ function wasd () {
     textGrass.wrapS = THREE.RepeatWrapping;
     textGrass.wrapT = THREE.RepeatWrapping;
     textGrass.repeat.set( 3, 3 );
-    let tileGeometry = new THREE.PlaneBufferGeometry(floorSettings.tileSize, floorSettings.tileSize)
+    let tileGeometry = new THREE.PlaneGeometry(floorSettings.tileSize, floorSettings.tileSize,8, 8)
     let tile = new THREE.Mesh(tileGeometry, new THREE.MeshStandardMaterial({ map:textGrass,
       side: THREE.DoubleSide
     }))
 
     tile.rotation.x = Math.PI/2
+
+    for (var i = 0; i < tile.geometry.vertices.length; i++){ 
+
+       tile.geometry.vertices[i].z += Math.random()* 25 - 25; 
+    } 
 
     tile.position.copy(tilePosition(discretizePosition(coords)))
 
@@ -711,14 +737,24 @@ function wasd () {
 
   gui.add(cameraSettings, 'firstPerson').onChange(active => {
     if (active) {
+
       cameraSettings.originalCameraPosition = camera.position.clone()
       cameraSettings.originalCameraRotation = camera.rotation.clone()
       controls.reset()
       controls.enabled = false
 
+      cube.position.y += 100
+      let geometry = new THREE.CylinderGeometry( 15, 15, 300, 32 );
+      let material = new THREE.MeshPhongMaterial( {color: 0x797878} );
+      let cylinder = new THREE.Mesh( geometry, material );
+      cylinder.rotation.z = -90* Math.PI/180
+      cylinder.position.y -= 30
+      cylinder.position.z = 15
+      cube.add(cylinder)
+      cube.add(lighter)
       cube.add(camera)
       camera.position.set(0, 0, 0)
-      camera.rotation.y = -Math.PI/2
+      camera.rotation.y = - Math.PI/2
     }
     else {
       cube.remove(camera)
