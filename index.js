@@ -9,6 +9,8 @@ import bufferGeometryMerger from './bufferGeometryMerger'
 import {debounce, throttle, random, times, remove} from 'lodash'
 import SimplexNoise from 'simplex-noise'
 
+
+const noise = new SimplexNoise();
 window.THREE = THREE
 window.gui = new dat.GUI({closeOnTop: true, hideable: false, width: 350})
 let stats = new Stats()
@@ -36,7 +38,7 @@ scene.add(grids)
 
 
 var spriteMap = new THREE.TextureLoader().load( "assets/img/treeOne.png" );
-var spriteMaterial = new THREE.SpriteMaterial( { map: spriteMap, light: true, transparent: true} );
+var spriteMaterial = new THREE.MeshPhongMaterial( { map: spriteMap, lights: true, transparent: false} );
 var sprite = new THREE.Sprite( spriteMaterial );
 scene.add( sprite );
 sprite.position.set(800,290,0)
@@ -62,7 +64,7 @@ spotLight.shadow.camera.near = 500;
 spotLight.shadow.camera.far = 4000;
 spotLight.shadow.camera.fov = 30;
 
-//scene.add( spotLight );
+scene.add( spotLight );
 
 
 window.controls = new OrbitControls(camera, renderer.domElement)
@@ -86,10 +88,19 @@ var lighter = new THREE.PointLight( 0xffffff, 3, 700 );
 window.sceneSettings = {
   Intensity: 3,
   Decay: 0.5,
-  //lightMain: false,
+  MainLight: true,
 }
 
 let sceneFolder = gui.addFolder('scene')
+  sceneFolder.add(sceneSettings, 'MainLight').onChange( function() { 
+
+    if(sceneSettings.MainLight){
+      spotLight.visible = true
+    }else{
+      spotLight.visible = false
+    }
+
+   }).listen()
   sceneFolder.add(sceneSettings, 'Intensity',  0.1, 100).step( 0.1 ).name('Intensity Light').onChange( function() { 
   lighter.intensity = sceneSettings.Intensity
 
@@ -650,7 +661,7 @@ function wasd () {
 
     for (var i = 0; i < tile.geometry.vertices.length; i++){ 
 
-       tile.geometry.vertices[i].z += Math.random()* 25 - 25; 
+       //tile.geometry.vertices[i].z += Math.random()* 25 - 25; 
     } 
 
     tile.position.copy(tilePosition(discretizePosition(coords)))
@@ -737,6 +748,8 @@ function wasd () {
 
   gui.add(cameraSettings, 'firstPerson').onChange(active => {
     if (active) {
+
+      spotLight.visible = false
 
       cameraSettings.originalCameraPosition = camera.position.clone()
       cameraSettings.originalCameraRotation = camera.rotation.clone()
@@ -860,6 +873,7 @@ function render () {
   stats.begin()
   requestAnimationFrame(render)
   let delta = clock.getDelta()
+  if(cameraSettings.firstPerson){makeRoughGround(tile)}
 
   mixers.forEach(mixer => mixer.update(delta))
 
@@ -872,6 +886,21 @@ function render () {
   // renderer.render(scene, camera, wglrt)
 
   stats.end()
+}
+function makeRoughGround(mesh) {
+        mesh.geometry.vertices.forEach(function(vertex, i) {
+            let amp = 2;
+            let time = Date.now();
+            let distance = noise.noise2D(
+                vertex.x + time * 0.0003,
+                vertex.y + time * 0.0001
+            ) * amp;
+            vertex.z = distance;
+        })
+        mesh.geometry.verticesNeedUpdate = true;
+        mesh.geometry.normalsNeedUpdate = true;
+        mesh.geometry.computeVertexNormals();
+        mesh.geometry.computeFaceNormals();
 }
 
 render()
